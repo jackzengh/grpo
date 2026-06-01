@@ -1,0 +1,9 @@
+deepspeed
+numpy
+torch
+datasets
+transformers
+tqdm
+vllm
+math_verify
+wandb
