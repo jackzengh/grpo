@@ -193,7 +193,7 @@ def evaluate_on_test_set(
     }
 
     all_query_token_ids = [] # prompt tokens
-    all_responses_token_ids = [] # answer tokens 
+    all_response_token_ids = [] # answer tokens
 
     for i, sample in enumerate(test_dataset): # test_dataset being structured as dict
 
