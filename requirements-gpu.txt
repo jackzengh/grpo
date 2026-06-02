@@ -13,12 +13,12 @@
 #   Then verify torch is untouched:  python -c "import torch; print(torch.__version__)"
 #   (should print 2.11.0+cu128). DeepSpeed compiles CUDA ops against the installed
 #   torch at install time, so make sure torch is final BEFORE this installs.
-torch==2.11.0
-vllm==0.22.0            # pins torch==2.11.0
-deepspeed==0.19.1       # first release that builds against torch >= 2.11 (0.16.2 fails)
-transformers>=4.56.0    # vllm 0.22 requires >=4.56.0; old 4.47.1 is too low. Stay on 4.56.x, not 5.x
-datasets==4.8.5
-numpy<2.0
+torch
+vllm
+deepspeed
+transformers
+datasets
+numpy
 tqdm
 wandb
 math_verify
