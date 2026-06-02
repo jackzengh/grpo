@@ -1,22 +1,36 @@
 # Full GRPO training stack — runs ONLY on Linux + NVIDIA GPU (CUDA).
-# Do NOT install on macOS. Use on a cloud GPU box (RunPod / Lambda / Vast.ai / Colab).
+# Do NOT install on macOS. Use on a cloud GPU box (Colab / RunPod / Lambda / Vast.ai).
 #
-# Versions pinned to a known-compatible set for torch 2.11 + CUDA 12.8 (Colab, mid-2026).
+# Versions pinned to a known-good set (mid-2026 Colab: torch 2.11 + CUDA, driver 13.0).
 #
-# IMPORTANT — avoid the torch-reinstall trap:
-#   The default `pip install vllm` wheel is built for CUDA 12.9 and bundles its own
-#   torch (2.11.0+cu129), which OVERWRITES Colab's preinstalled torch 2.11.0+cu128.
-#   To keep the cu128 build, install with the cu128 torch index:
+# WHY THESE ARE PINNED:
+#   Leaving torch/vllm unpinned makes pip grab "latest", which drifts over time and
+#   pulls a vllm built for a different CUDA than the box provides — the import then
+#   dies with "libcudart.so.XX: cannot open shared object file". vllm 0.22.0 requires
+#   exactly torch==2.11.0 and is built against CUDA 13, which Colab's driver supports.
 #
-#     pip install -r requirements-gpu.txt --extra-index-url https://download.pytorch.org/whl/cu128
+# LIBCUDART LINKER FIX (Colab):
+#   vllm 0.22.0's compiled core needs libcudart.so.13. The CUDA 13 runtime wheel is
+#   installed but may not be on the linker path. Before importing vllm, run (at the
+#   very top of your first cell, then RESTART the kernel):
 #
-#   Then verify torch is untouched:  python -c "import torch; print(torch.__version__)"
-#   (should print 2.11.0+cu128). DeepSpeed compiles CUDA ops against the installed
-#   torch at install time, so make sure torch is final BEFORE this installs.
-torch
-vllm
+#     import os
+#     os.environ["LD_LIBRARY_PATH"] = (
+#         "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib:"
+#         + os.environ.get("LD_LIBRARY_PATH", "")
+#     )
+#
+#   Verify after restart:  python -c "from vllm import LLM; print('ok')"
+
+# NOTE: vllm 0.22.0 requires transformers>=4.56.0 (and is incompatible with the
+# 2024-era transformers 4.47 / numpy<2 the code was first written against). The
+# pins below are the modern set that resolves cleanly with vllm 0.22 + torch 2.11.
+# If you hit transformers-API breakage in the notebook, that's the expected cost of
+# moving forward on a current box — patch the call sites rather than downgrading vllm.
+torch==2.11.0
+vllm==0.22.0
 deepspeed
-transformers
+transformers>=4.56.0
 datasets
 numpy
 tqdm
