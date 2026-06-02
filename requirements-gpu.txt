@@ -1,0 +1,12 @@
+# Full GRPO training stack — runs ONLY on Linux + NVIDIA GPU (CUDA).
+# Do NOT install on macOS. Use on a cloud GPU box (RunPod / Lambda / Vast.ai / Colab).
+# Versions pinned to a known-compatible set for vllm 0.6.x + torch 2.5.x on CUDA 12.1.
+torch
+vllm
+deepspeed==0.16.2
+transformers==4.47.1
+datasets==3.2.0
+numpy<2.0
+tqdm
+wandb
+math_verify

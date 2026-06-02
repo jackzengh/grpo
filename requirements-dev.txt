@@ -1,0 +1,10 @@
+# Mac-installable subset — for editing/reading code locally.
+# Does NOT include vllm or deepspeed (NVIDIA-GPU only; won't install on Mac).
+# Full training stack lives in requirements-gpu.txt and runs on a cloud GPU box.
+numpy
+torch
+datasets
+transformers
+tqdm
+wandb
+math_verify
