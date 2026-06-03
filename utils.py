@@ -42,8 +42,12 @@ def prepare_model_inputs(
         combined_ids = query + response 
         seq_len = len(combined_ids)
 
+        ###################################
+        # PADDING MASK
+        ###################################
+        
         # for a single sequence prepare inputs + labels + advantages and append to respective array in the *inputs* dict
-        # create padded seq
+        # create padded sequence
         input_ids = combined_ids + [pad_token_id] * (max_seq_len-seq_len) # pad to max_tokens
         attention_mask = [1] * seq_len + [0] * (max_seq_len-seq_len) # mask out the padding tokens
         
@@ -51,6 +55,9 @@ def prepare_model_inputs(
         # we mask out query because we don't want to train the model to predict the prompt
         labels = [ignore_index] * len(query) + response + [ignore_index] * (max_seq_len-seq_len) # mask the query + pad tokens
 
+        ###################################
+        # LOSS + ADVANTAGE MASK
+        ###################################
         """
         WTF IS LABELS?
         
@@ -59,6 +66,7 @@ def prepare_model_inputs(
         our policy_model (learner). That's why we need to mask labels, we don't 
         want our policy_model learning to generate 'query' tokens
         """
+
         labels_mask = [0] * len(query) + [1] * len(response) + [0] * (max_seq_len-seq_len)
         advantages_seq = [0] * len(query) + advantage + [0.0] * (max_seq_len-seq_len)
 
