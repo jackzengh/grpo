@@ -182,8 +182,13 @@ def evaluate_on_test_set(
     """
     # generations will returns an array of arrays with the completions for each respective prompt
     # vLLM is built for batching prompts and simultaneous generation
+    #
+    # NOTE (vLLM API): generate() no longer takes a top-level prompt_token_ids= kwarg.
+    # Pre-tokenized input is passed as the first positional arg, as a list of dicts
+    # each shaped {"prompt_token_ids": [...]} (vLLM's "TokensPrompt" form).
     generations = inference_engine.generate(
-        prompt_token_ids=test_dataset["input_ids"], sampling_params=eval_sampling_params
+        [{"prompt_token_ids": ids} for ids in test_dataset["input_ids"]],
+        sampling_params=eval_sampling_params,
     ) # controlled generation with temperature, max_tokens setting
 
     metrics = {
