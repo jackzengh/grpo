@@ -124,6 +124,10 @@ def compute_token_log_probs(
     # shift labels right, 
     shift_labels = inputs["labels"][..., 1:]  # Shape: [batch_size, seq_len-1] now indices of logits and compared labels are matched up
     
+    ###################################
+    # LABELS MASK NEEDED HERE!
+    ###################################
+    
     # RECALL: labels_mask = [0] * len(query) + [1] * len(response) + [0] * (max_seq_len-seq_len)
     shift_labels_mask = inputs["labels_mask"][..., 1:]  # Shape: [batch_size, seq_len-1], take only the tokens at t+1, which is what you're matching the completion against
 
