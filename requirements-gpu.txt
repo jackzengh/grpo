@@ -9,18 +9,36 @@
 #   dies with "libcudart.so.XX: cannot open shared object file". vllm 0.22.0 requires
 #   exactly torch==2.11.0 and is built against CUDA 13, which Colab's driver supports.
 #
-# LIBCUDART LINKER FIX (Colab):
-#   vllm 0.22.0's compiled core needs libcudart.so.13. The CUDA 13 runtime wheel is
-#   installed but may not be on the linker path. Before importing vllm, run (at the
-#   very top of your first cell, then RESTART the kernel):
+# CUDA 13 SHARED-LIBRARY FIX (Colab):
+#   vllm 0.22.0's compiled extensions need CUDA 13 .so files that are installed (by the
+#   pip CUDA wheels, under nvidia/cu13/lib) but NOT on the system linker path:
+#     - libcudart.so.13  -> needed by the vllm core import
+#     - libnvrtc.so.13   -> needed by vllm.cumem_allocator, i.e. SLEEP MODE
+#                           (enable_sleep_mode=True). If this one is missing, the
+#                           cumem import fails silently and vllm reports the misleading
+#                           "cumem allocator is not supported on current platform".
 #
-#     import os
-#     os.environ["LD_LIBRARY_PATH"] = (
-#         "/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib:"
-#         + os.environ.get("LD_LIBRARY_PATH", "")
-#     )
+#   FIX: register the cu13/lib dir with the SYSTEM loader via ldconfig (it writes an
+#   on-disk cache), so EVERY process started afterward finds the libs -- including the
+#   subprocesses vLLM forks for model inspection and its EngineCore workers. The
+#   notebook does this in the setup cell, AFTER pip install and BEFORE importing vllm:
 #
-#   Verify after restart:  python -c "from vllm import LLM; print('ok')"
+#     with open("/etc/ld.so.conf.d/nvidia-cu13.conf", "w") as f:
+#         f.write("/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib\n")
+#     import subprocess; subprocess.run(["ldconfig"], check=True)
+#
+#   WHY ldconfig and NOT an in-process ctypes preload or LD_LIBRARY_PATH:
+#     A ctypes.CDLL(..., RTLD_GLOBAL) preload only fixes the CURRENT process. vLLM
+#     spawns fresh subprocesses (e.g. `python -m vllm.model_executor.models.registry`
+#     for model inspection, plus EngineCore workers) that do NOT inherit in-memory
+#     preloads -- they re-run `import vllm._C` and fail with
+#     "ImportError: libcudart.so.13: cannot open shared object file". LD_LIBRARY_PATH
+#     has the same fork-survival problem in vLLM's multiprocess architecture. ldconfig
+#     updates the on-disk loader cache, which child processes DO see.
+#
+#   Verify:  setup cell prints "CUDA 13 libs registered with ldconfig OK", the import
+#            cell prints "vllm imported OK", and LLM(..., enable_sleep_mode=True)
+#            constructs without the cumem / libcudart subprocess errors.
 
 # NOTE: vllm 0.22.0 requires transformers>=4.56.0 (and is incompatible with the
 # 2024-era transformers 4.47 / numpy<2 the code was first written against). The
