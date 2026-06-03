@@ -6,6 +6,7 @@ import socket
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import wandb
@@ -170,6 +171,7 @@ def evaluate_on_test_set(
     eos_token: str,
     eval_sampling_params: SamplingParams,
     reward_func: Callable[[str, Dict[str, Any]], Tuple[float, Dict[str, float]]], # generic reward function that takes function as input with parameters of (completion, sample)
+    num_eval_samples: int = 500,
 ):
     """
     We'll need to sample from the test dataset, pass the prompt into the 
@@ -180,6 +182,12 @@ def evaluate_on_test_set(
     to determine temperature + max_tokens
 
     """
+    ### PLUCK OUT num_eval_samples from the eval set
+    # Subsample the test set so eval is fast (mirrors the training-loop sampling idiom).
+    # `size=` is np.random.choice's count kwarg; replace=False so prompts are unique.
+    indices = np.random.choice(len(test_dataset), size=num_eval_samples, replace=False)
+    eval_samples = test_dataset.select(indices)
+
     # generations will returns an array of arrays with the completions for each respective prompt
     # vLLM is built for batching prompts and simultaneous generation
     #
@@ -187,7 +195,7 @@ def evaluate_on_test_set(
     # Pre-tokenized input is passed as the first positional arg, as a list of dicts
     # each shaped {"prompt_token_ids": [...]} (vLLM's "TokensPrompt" form).
     generations = inference_engine.generate(
-        [{"prompt_token_ids": ids} for ids in test_dataset["input_ids"]],
+        [{"prompt_token_ids": ids} for ids in eval_samples["input_ids"]],
         sampling_params=eval_sampling_params,
     ) # controlled generation with temperature, max_tokens setting
 
@@ -200,7 +208,7 @@ def evaluate_on_test_set(
     all_query_token_ids = [] # prompt tokens
     all_response_token_ids = [] # answer tokens
 
-    for i, sample in enumerate(test_dataset): # test_dataset being structured as dict
+    for i, sample in enumerate(eval_samples): # iterate the SAME subsample we generated for, so generations[i] lines up
 
         query_token_ids = sample["input_ids"]
         response_token_ids = generations[i].outputs[0].token_ids 

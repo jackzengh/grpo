@@ -57,15 +57,3 @@ Consequences for you:
 - Explain things in plain language, assuming no ML/programming jargon — define
   terms, use simple analogies. The user is learning this material.
 - Tech stack is Python + PyTorch.
-- **Never** add "Co-Authored-By: Claude" or any Claude attribution to git commits.
-- Only commit or push when explicitly asked.
-
-## Gotchas
-
-- There's a known variable-name inconsistency in `utils.py`'s
-  `evaluate_on_test_set` (`all_responses_token_ids` declared vs.
-  `all_response_token_ids` appended). If you touch that function, reconcile the
-  names rather than leaving the latent bug.
-- Output (checkpoints, episodes, eval) is written under
-  `~/scratch/deepseek_r1z_hackathon/<RUN_NAME>/`, and training auto-resumes from
-  the latest checkpoint via `find_last_checkpoint`.

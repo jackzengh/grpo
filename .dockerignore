@@ -1,0 +1,14 @@
+# .dockerignore — files Docker should NOT send into the image during `docker build`.
+# Keeps the image small and avoids shipping Mac-local / generated junk.
+# (Same idea as .gitignore, but for Docker builds.)
+
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.DS_Store
+.claude/
+
+# We don't need the Mac-only dev requirements inside the GPU image.
+requirements-dev.txt
