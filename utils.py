@@ -355,4 +355,22 @@ def load_model_into_vllm(model: Union[DeepSpeedEngine, PreTrainedModel], llm: LL
         None
     """
     state_dict = model.module.state_dict() if isinstance(model, DeepSpeedEngine) else model.state_dict()
-    llm.llm_engine.model_executor.driver_worker.model_runner.model.load_weights(state_dict.items())
+
+    # Push the fresh weights into vLLM.
+    #
+    # OLD (vLLM <= ~0.6) reached into the engine internals by hand:
+    #     llm.llm_engine.model_executor.driver_worker.model_runner.model.load_weights(...)
+    # That deep attribute chain no longer exists in vLLM's V1 engine (0.22), so it dies with
+    #     AttributeError: 'LLMEngine' object has no attribute 'model_executor'
+    #
+    # The modern, documented way is `collective_rpc("reload_weights", ...)`. `collective_rpc`
+    # runs a named engine method on EVERY vLLM worker (there can be more than one, e.g. under
+    # tensor parallelism). The built-in "reload_weights" method accepts a `weights_iterator`:
+    # an iterable of (param_name, tensor) pairs — which is exactly what `state_dict.items()`
+    # gives us. vLLM handles finding the model on each worker and calling load_weights itself,
+    # so we don't touch any worker internals.
+    #
+    # This is vLLM's officially-documented RLHF weight-sync path:
+    #   https://github.com/vllm-project/vllm/blob/main/docs/training/layerwise.md
+    weights = list(state_dict.items())
+    llm.collective_rpc("reload_weights", kwargs={"weights_iterator": weights})
