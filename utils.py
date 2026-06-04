@@ -340,37 +340,34 @@ def dump_episodes(
 
 def load_model_into_vllm(model: Union[DeepSpeedEngine, PreTrainedModel], llm: LLM) -> None:
     """
-    Load weights from a HuggingFace model (either wrapped in DeepSpeed or not) into a vLLM inference engine.
-
-    This function transfers the weights from a training model to a vLLM inference engine,
-    allowing for efficient inference using the updated model weights.
+    Copy the freshly-trained policy weights from a HuggingFace/DeepSpeed model into the
+    running vLLM inference engine, so the next round of generation uses the updated model.
 
     Args:
-        model (Union[DeepSpeedEngine, PreTrainedModel]): The source model to copy weights from.
-            Can be either a DeepSpeed-wrapped model or a regular HuggingFace PreTrainedModel.
-        vllm (LLM): The target vLLM inference engine to load the weights into.
-            Must be already initialized and ready to accept new weights.
+        model: The source model to copy weights from — either a DeepSpeed-wrapped model
+            or a plain HuggingFace PreTrainedModel.
+        llm: The target vLLM engine. Must already be initialized.
 
-    Returns:
-        None
+    IMPORTANT — call ordering with sleep mode:
+        This notebook runs vLLM colocated on one GPU with enable_sleep_mode=True, and calls
+        `inference_engine.sleep(1)` (sleep LEVEL 1) after generation. Level-1 sleep OFFLOADS
+        the weights to CPU and marks their GPU region as "offloaded" in vLLM's CuMemAllocator.
+        A plain `wake_up()` does NOT restore level-1-offloaded weights — only
+        `wake_up(tags=["weights"])` triggers the allocator to bring them back to the GPU.
+        So the caller MUST do `inference_engine.wake_up(tags=["weights"])` *before* calling
+        this function. If you skip the tag, load_weights() writes into the still-offloaded
+        (freed) GPU region → an illegal CUDA memory write → the kernel dies with no traceback.
     """
+    # state_dict is {param_name: tensor}. We hand it to vLLM as (name, tensor) pairs, which is
+    # exactly the format every HF/vLLM model's `load_weights` expects.
     state_dict = model.module.state_dict() if isinstance(model, DeepSpeedEngine) else model.state_dict()
-
-    # Push the fresh weights into vLLM.
-    #
-    # OLD (vLLM <= ~0.6) reached into the engine internals by hand:
-    #     llm.llm_engine.model_executor.driver_worker.model_runner.model.load_weights(...)
-    # That deep attribute chain no longer exists in vLLM's V1 engine (0.22), so it dies with
-    #     AttributeError: 'LLMEngine' object has no attribute 'model_executor'
-    #
-    # The modern, documented way is `collective_rpc("reload_weights", ...)`. `collective_rpc`
-    # runs a named engine method on EVERY vLLM worker (there can be more than one, e.g. under
-    # tensor parallelism). The built-in "reload_weights" method accepts a `weights_iterator`:
-    # an iterable of (param_name, tensor) pairs — which is exactly what `state_dict.items()`
-    # gives us. vLLM handles finding the model on each worker and calling load_weights itself,
-    # so we don't touch any worker internals.
-    #
-    # This is vLLM's officially-documented RLHF weight-sync path:
-    #   https://github.com/vllm-project/vllm/blob/main/docs/training/layerwise.md
     weights = list(state_dict.items())
-    llm.collective_rpc("reload_weights", kwargs={"weights_iterator": weights})
+
+    # `apply_model(fn)` is the vLLM V1 way to reach the live model: it runs `fn` on the worker
+    # and passes in the worker's model object (a torch.nn.Module). We then call that model's
+    # own `load_weights`. (The old `llm.llm_engine.model_executor.driver_worker.model_runner.
+    # model.load_weights(...)` chain was the pre-0.22 V0 path and no longer exists in V1.)
+    def _load_weights(vllm_model: torch.nn.Module) -> None:
+        vllm_model.load_weights(weights)
+
+    llm.apply_model(_load_weights)
