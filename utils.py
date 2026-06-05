@@ -350,18 +350,39 @@ def load_model_into_vllm(model: Union[DeepSpeedEngine, PreTrainedModel], llm: LL
 
     IMPORTANT — call ordering with sleep mode:
         This notebook runs vLLM colocated on one GPU with enable_sleep_mode=True, and calls
-        `inference_engine.sleep(1)` (sleep LEVEL 1) after generation. Level-1 sleep OFFLOADS
-        the weights to CPU and marks their GPU region as "offloaded" in vLLM's CuMemAllocator.
-        A plain `wake_up()` does NOT restore level-1-offloaded weights — only
-        `wake_up(tags=["weights"])` triggers the allocator to bring them back to the GPU.
-        So the caller MUST do `inference_engine.wake_up(tags=["weights"])` *before* calling
-        this function. If you skip the tag, load_weights() writes into the still-offloaded
-        (freed) GPU region → an illegal CUDA memory write → the kernel dies with no traceback.
+        `inference_engine.sleep(2)` (sleep LEVEL 2) after generation. Level-2 sleep DISCARDS
+        both the KV cache and the model weights — the weights are NOT kept on CPU, their GPU
+        region is simply freed in vLLM's CuMemAllocator. So before this function runs, the
+        caller must re-allocate the weight region, in order:
+            inference_engine.wake_up(tags=["weights"])      # re-allocate the (empty) region
+            load_model_into_vllm(...)                        # <- THIS function, fills it
+            inference_engine.wake_up(tags=["kv_cache"])      # allocate KV cache last (low peak mem)
+        We do NOT call `collective_rpc("reload_weights")` between wake_up(weights) and this
+        function. `reload_weights` re-materialises the ORIGINAL base checkpoint into the freed
+        region; we don't want those base weights (we're about to overwrite the model with the
+        freshly-trained policy anyway). Because we write the FULL state_dict (every parameter,
+        see below), there is no uninitialised-parameter gap to back-fill — load_weights fills the
+        whole region itself. (The earlier crash that looked like "must reload_weights first" was
+        actually the cross-process CUDA-tensor bug described below, fixed by the .cpu() copy.)
     """
     # state_dict is {param_name: tensor}. We hand it to vLLM as (name, tensor) pairs, which is
     # exactly the format every HF/vLLM model's `load_weights` expects.
+    #
+    # CRITICAL — move every weight to CPU FIRST (.detach().cpu()).
+    # `apply_model` (below) runs our function in vLLM's SEPARATE worker PROCESS, so it has to
+    # pickle this `weights` list and ship it across the process boundary. A process owns its
+    # GPU memory privately: another process cannot read it. A CUDA tensor therefore pickles as a
+    # *handle pointing at the trainer's GPU buffer*, not the actual numbers -- the worker opens
+    # that handle, finds it points to memory it doesn't own, and dies with an illegal CUDA access
+    # (no traceback, the cell just stops dead). A CPU tensor instead pickles as its REAL BYTES,
+    # which cross any process boundary cleanly. The worker receives genuine data and
+    # `load_weights` copies it onto the worker's OWN GPU (param.copy_ moves CPU->GPU for us), in
+    # the worker's own context, which is legal. (~6 GB GPU->CPU->GPU per call; a few seconds,
+    # negligible next to generation + the backward pass each iteration.)
+    # NOTE: DeepSpeed ZeRO-2 shards optimizer state, NOT parameters, so state_dict() here is the
+    # FULL, materialized parameter set -- no gather needed (this would differ under ZeRO-3).
     state_dict = model.module.state_dict() if isinstance(model, DeepSpeedEngine) else model.state_dict()
-    weights = list(state_dict.items())
+    weights = [(name, tensor.detach().cpu()) for name, tensor in state_dict.items()]
 
     # `apply_model(fn)` is the vLLM V1 way to reach the live model: it runs `fn` on the worker
     # and passes in the worker's model object (a torch.nn.Module). We then call that model's
